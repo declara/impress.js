@@ -29,7 +29,7 @@
 // It's the core `impress` function that returns the impress.js API
 // for a presentation based on the element with given id ('impress'
 // by default).
-var Impress = window.Impress = function (rootId) {
+var Impress = window.Impress = function (rootIdParam) {
 
 
     'use strict';
@@ -174,6 +174,154 @@ var Impress = window.Impress = function (rootId) {
             return scale;
         },
 
+
+
+
+    // `goto` API function that moves to step given with `el` parameter (by index, id or element),
+    // with a transition `duration` optionally given as second parameter.
+        goto = function (el, duration) {
+
+            if (!initialized || !(el = getStep(el))) {
+                // presentation not initialized or given element is not a step
+                return false;
+            }
+
+            // Sometimes it's possible to trigger focus on first link with some keyboard action.
+            // Browser in such a case tries to scroll the page to make this element visible
+            // (even that body overflow is set to hidden) and it breaks our careful positioning.
+            //
+            // So, as a lousy (and lazy) workaround we will make the page scroll back to the top
+            // whenever slide is selected
+            //
+            // If you are reading this and know any better way to handle it, I'll be glad to hear about it!
+            window.scrollTo(0, 0);
+
+            var step = stepsData["impress-" + el.id];
+
+            if (activeStep) {
+                activeStep.classList.remove("active");
+                body.classList.remove("impress-on-" + activeStep.id);
+            }
+            el.classList.add("active");
+
+            body.classList.add("impress-on-" + el.id);
+
+            // compute target state of the canvas based on given step
+            var target = {
+                rotate: {
+                    x: -step.rotate.x,
+                    y: -step.rotate.y,
+                    z: -step.rotate.z
+                },
+                translate: {
+                    x: -step.translate.x,
+                    y: -step.translate.y,
+                    z: -step.translate.z
+                },
+                scale: 1 / step.scale
+            };
+
+            // Check if the transition is zooming in or not.
+            //
+            // This information is used to alter the transition style:
+            // when we are zooming in - we start with move and rotate transition
+            // and the scaling is delayed, but when we are zooming out we start
+            // with scaling down and move and rotation are delayed.
+            var zoomin = target.scale >= currentState.scale;
+
+            duration = toNumber(duration, config.transitionDuration);
+            var delay = (duration / 2);
+
+            // if the same step is re-selected, force computing window scaling,
+            // because it is likely to be caused by window resize
+            if (el === activeStep) {
+                windowScale = computeWindowScale(config);
+            }
+
+            var targetScale = target.scale * windowScale;
+
+            // trigger leave of currently active element (if it's not the same step again)
+            if (activeStep && activeStep !== el) {
+                onStepLeave(activeStep);
+            }
+
+            // Now we alter transforms of `root` and `canvas` to trigger transitions.
+            //
+            // And here is why there are two elements: `root` and `canvas` - they are
+            // being animated separately:
+            // `root` is used for scaling and `canvas` for translate and rotations.
+            // Transitions on them are triggered with different delays (to make
+            // visually nice and 'natural' looking transitions), so we need to know
+            // that both of them are finished.
+            css(root, {
+                // to keep the perspective look similar for different scales
+                // we need to 'scale' the perspective, too
+                transform: perspective(config.perspective / targetScale) + scale(targetScale),
+                transitionDuration: duration + "ms",
+                transitionDelay: (zoomin ? delay : 0) + "ms"
+            });
+
+            css(canvas, {
+                transform: rotate(target.rotate, true) + translate(target.translate),
+                transitionDuration: duration + "ms",
+                transitionDelay: (zoomin ? 0 : delay) + "ms"
+            });
+
+            // Here is a tricky part...
+            //
+            // If there is no change in scale or no change in rotation and translation, it means there was actually
+            // no delay - because there was no transition on `root` or `canvas` elements.
+            // We want to trigger `impress:stepenter` event in the correct moment, so here we compare the current
+            // and target values to check if delay should be taken into account.
+            //
+            // I know that this `if` statement looks scary, but it's pretty simple when you know what is going on
+            // - it's simply comparing all the values.
+            if (currentState.scale === target.scale ||
+                (currentState.rotate.x === target.rotate.x && currentState.rotate.y === target.rotate.y &&
+                currentState.rotate.z === target.rotate.z && currentState.translate.x === target.translate.x &&
+                currentState.translate.y === target.translate.y && currentState.translate.z === target.translate.z)) {
+                delay = 0;
+            }
+
+            // store current state
+            currentState = target;
+            activeStep = el;
+
+            // And here is where we trigger `impress:stepenter` event.
+            // We simply set up a timeout to fire it taking transition duration (and possible delay) into account.
+            //
+            // I really wanted to make it in more elegant way. The `transitionend` event seemed to be the best way
+            // to do it, but the fact that I'm using transitions on two separate elements and that the `transitionend`
+            // event is only triggered when there was a transition (change in the values) caused some bugs and
+            // made the code really complicated, cause I had to handle all the conditions separately. And it still
+            // needed a `setTimeout` fallback for the situations when there is no transition at all.
+            // So I decided that I'd rather make the code simpler than use shiny new `transitionend`.
+            //
+            // If you want learn something interesting and see how it was done with `transitionend` go back to
+            // version 0.5.2 of impress.js: http://github.com/bartaz/impress.js/blob/0.5.2/js/impress.js
+            window.clearTimeout(stepEnterTimeout);
+            stepEnterTimeout = window.setTimeout(function () {
+                onStepEnter(activeStep);
+            }, duration + delay);
+
+            return el;
+        },
+
+    // `prev` API function goes to previous step (in document order)
+        prev = function () {
+            var prev = steps.indexOf(activeStep) - 1;
+            prev = prev >= 0 ? steps[prev] : steps[steps.length - 1];
+
+            return goto(prev);
+        },
+
+    // `next` API function goes to next step (in document order)
+        next = function () {
+            var next = steps.indexOf(activeStep) + 1;
+            next = next < steps.length ? steps[next] : steps[0];
+
+            return goto(next);
+        },
     // CHECK SUPPORT
         body = document.body,
 
@@ -211,42 +359,16 @@ var Impress = window.Impress = function (rootId) {
                 // but some mobile devices need to be blacklisted,
                 // because their CSS 3D support or hardware is not
                 // good enough to run impress.js properly, sorry...
-            ( ua.search(/(iphone)|(ipod)|(android)/) === -1 );
-
-    if (!impressSupported) {
-        // we can't be sure that `classList` is supported
-        body.className += " impress-not-supported ";
-    } else {
-        body.classList.remove("impress-not-supported");
-        body.classList.add("impress-supported");
-    }
+            ( ua.search(/(iphone)|(ipod)|(android)/) === -1 ),
+        rootId = rootIdParam || "impress",
+        
 
 
-    // flag that can be used in JS to check if browser have passed the support test
-    //this.supported = impressSupported;
 
 
-    // If impress.js is not supported by the browser return a dummy API
-    // it may not be a perfect solution but we return early and avoid
-    // running code that may use features not implemented in the browser.
-    if (!impressSupported) {
-        return {
-            init: empty,
-            goto: empty,
-            prev: empty,
-            next: empty
-        };
-    }
-
-    rootId = rootId || "impress";
-
-    // if given root is already initialized just return the API
-    if (roots["impress-root-" + rootId]) {
-        return roots["impress-root-" + rootId];
-    }
 
     // data of all presentation steps
-    var stepsData = {},
+     stepsData = {},
 
     // element of currently active step
         activeStep = null,
@@ -425,153 +547,47 @@ var Impress = window.Impress = function (rootId) {
         },
 
     // used to reset timeout for `impress:stepenter` event
-        stepEnterTimeout = null,
+        stepEnterTimeout = null;
 
-    // `goto` API function that moves to step given with `el` parameter (by index, id or element),
-    // with a transition `duration` optionally given as second parameter.
-        goto = function (el, duration) {
 
-            if (!initialized || !(el = getStep(el))) {
-                // presentation not initialized or given element is not a step
-                return false;
-            }
 
-            // Sometimes it's possible to trigger focus on first link with some keyboard action.
-            // Browser in such a case tries to scroll the page to make this element visible
-            // (even that body overflow is set to hidden) and it breaks our careful positioning.
-            //
-            // So, as a lousy (and lazy) workaround we will make the page scroll back to the top
-            // whenever slide is selected
-            //
-            // If you are reading this and know any better way to handle it, I'll be glad to hear about it!
-            window.scrollTo(0, 0);
 
-            var step = stepsData["impress-" + el.id];
 
-            if (activeStep) {
-                activeStep.classList.remove("active");
-                body.classList.remove("impress-on-" + activeStep.id);
-            }
-            el.classList.add("active");
 
-            body.classList.add("impress-on-" + el.id);
 
-            // compute target state of the canvas based on given step
-            var target = {
-                rotate: {
-                    x: -step.rotate.x,
-                    y: -step.rotate.y,
-                    z: -step.rotate.z
-                },
-                translate: {
-                    x: -step.translate.x,
-                    y: -step.translate.y,
-                    z: -step.translate.z
-                },
-                scale: 1 / step.scale
-            };
+    if (!impressSupported) {
+        // we can't be sure that `classList` is supported
+        body.className += " impress-not-supported ";
+    } else {
+        body.classList.remove("impress-not-supported");
+        body.classList.add("impress-supported");
+    }
 
-            // Check if the transition is zooming in or not.
-            //
-            // This information is used to alter the transition style:
-            // when we are zooming in - we start with move and rotate transition
-            // and the scaling is delayed, but when we are zooming out we start
-            // with scaling down and move and rotation are delayed.
-            var zoomin = target.scale >= currentState.scale;
 
-            duration = toNumber(duration, config.transitionDuration);
-            var delay = (duration / 2);
+    // flag that can be used in JS to check if browser have passed the support test
+    //this.supported = impressSupported;
 
-            // if the same step is re-selected, force computing window scaling,
-            // because it is likely to be caused by window resize
-            if (el === activeStep) {
-                windowScale = computeWindowScale(config);
-            }
 
-            var targetScale = target.scale * windowScale;
-
-            // trigger leave of currently active element (if it's not the same step again)
-            if (activeStep && activeStep !== el) {
-                onStepLeave(activeStep);
-            }
-
-            // Now we alter transforms of `root` and `canvas` to trigger transitions.
-            //
-            // And here is why there are two elements: `root` and `canvas` - they are
-            // being animated separately:
-            // `root` is used for scaling and `canvas` for translate and rotations.
-            // Transitions on them are triggered with different delays (to make
-            // visually nice and 'natural' looking transitions), so we need to know
-            // that both of them are finished.
-            css(root, {
-                // to keep the perspective look similar for different scales
-                // we need to 'scale' the perspective, too
-                transform: perspective(config.perspective / targetScale) + scale(targetScale),
-                transitionDuration: duration + "ms",
-                transitionDelay: (zoomin ? delay : 0) + "ms"
-            });
-
-            css(canvas, {
-                transform: rotate(target.rotate, true) + translate(target.translate),
-                transitionDuration: duration + "ms",
-                transitionDelay: (zoomin ? 0 : delay) + "ms"
-            });
-
-            // Here is a tricky part...
-            //
-            // If there is no change in scale or no change in rotation and translation, it means there was actually
-            // no delay - because there was no transition on `root` or `canvas` elements.
-            // We want to trigger `impress:stepenter` event in the correct moment, so here we compare the current
-            // and target values to check if delay should be taken into account.
-            //
-            // I know that this `if` statement looks scary, but it's pretty simple when you know what is going on
-            // - it's simply comparing all the values.
-            if (currentState.scale === target.scale ||
-                (currentState.rotate.x === target.rotate.x && currentState.rotate.y === target.rotate.y &&
-                currentState.rotate.z === target.rotate.z && currentState.translate.x === target.translate.x &&
-                currentState.translate.y === target.translate.y && currentState.translate.z === target.translate.z)) {
-                delay = 0;
-            }
-
-            // store current state
-            currentState = target;
-            activeStep = el;
-
-            // And here is where we trigger `impress:stepenter` event.
-            // We simply set up a timeout to fire it taking transition duration (and possible delay) into account.
-            //
-            // I really wanted to make it in more elegant way. The `transitionend` event seemed to be the best way
-            // to do it, but the fact that I'm using transitions on two separate elements and that the `transitionend`
-            // event is only triggered when there was a transition (change in the values) caused some bugs and
-            // made the code really complicated, cause I had to handle all the conditions separately. And it still
-            // needed a `setTimeout` fallback for the situations when there is no transition at all.
-            // So I decided that I'd rather make the code simpler than use shiny new `transitionend`.
-            //
-            // If you want learn something interesting and see how it was done with `transitionend` go back to
-            // version 0.5.2 of impress.js: http://github.com/bartaz/impress.js/blob/0.5.2/js/impress.js
-            window.clearTimeout(stepEnterTimeout);
-            stepEnterTimeout = window.setTimeout(function () {
-                onStepEnter(activeStep);
-            }, duration + delay);
-
-            return el;
-        },
-
-    // `prev` API function goes to previous step (in document order)
-        prev = function () {
-            var prev = steps.indexOf(activeStep) - 1;
-            prev = prev >= 0 ? steps[prev] : steps[steps.length - 1];
-
-            return goto(prev);
-        },
-
-    // `next` API function goes to next step (in document order)
-        next = function () {
-            var next = steps.indexOf(activeStep) + 1;
-            next = next < steps.length ? steps[next] : steps[0];
-
-            return goto(next);
+    // If impress.js is not supported by the browser return a dummy API
+    // it may not be a perfect solution but we return early and avoid
+    // running code that may use features not implemented in the browser.
+    if (!impressSupported) {
+        return {
+            init: empty,
+            goto: empty,
+            prev: empty,
+            next: empty
         };
+    }
+
+
+
+    // if given root is already initialized just return the API
+    if (roots["impress-root-" + rootId]) {
+        return roots["impress-root-" + rootId];
+    }
+
+
 
     // Adding some useful classes to step elements.
     //
