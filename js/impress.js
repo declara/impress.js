@@ -175,8 +175,6 @@ var Impress = window.Impress = function (rootIdParam) {
         },
 
 
-
-
     // `goto` API function that moves to step given with `el` parameter (by index, id or element),
     // with a transition `duration` optionally given as second parameter.
         goto = function (el, duration) {
@@ -361,14 +359,10 @@ var Impress = window.Impress = function (rootIdParam) {
                 // good enough to run impress.js properly, sorry...
             ( ua.search(/(iphone)|(ipod)|(android)/) === -1 ),
         rootId = rootIdParam || "impress",
-        
-
-
-
 
 
     // data of all presentation steps
-     stepsData = {},
+        stepsData = {},
 
     // element of currently active step
         activeStep = null,
@@ -463,6 +457,125 @@ var Impress = window.Impress = function (rootIdParam) {
                 return;
             }
 
+
+
+
+
+            if (!impressSupported) {
+                // we can't be sure that `classList` is supported
+                body.className += " impress-not-supported ";
+            } else {
+                body.classList.remove("impress-not-supported");
+                body.classList.add("impress-supported");
+            }
+
+
+            // flag that can be used in JS to check if browser have passed the support test
+            //this.supported = impressSupported;
+
+
+            // If impress.js is not supported by the browser return a dummy API
+            // it may not be a perfect solution but we return early and avoid
+            // running code that may use features not implemented in the browser.
+            if (!impressSupported) {
+                return {
+                    init: empty,
+                    goto: empty,
+                    prev: empty,
+                    next: empty
+                };
+            }
+
+
+            // if given root is already initialized just return the API
+            if (roots["impress-root-" + rootId]) {
+                return roots["impress-root-" + rootId];
+            }
+
+
+            // Adding some useful classes to step elements.
+            //
+            // All the steps that have not been shown yet are given `future` class.
+            // When the step is entered the `future` class is removed and the `present`
+            // class is given. When the step is left `present` class is replaced with
+            // `past` class.
+            //
+            // So every step element is always in one of three possible states:
+            // `future`, `present` and `past`.
+            //
+            // There classes can be used in CSS to style different types of steps.
+            // For example the `present` class can be used to trigger some custom
+            // animations when step is shown.
+            root.addEventListener("impress:init", function () {
+                // STEP CLASSES
+                steps.forEach(function (step) {
+                    step.classList.add("future");
+                });
+
+                root.addEventListener("impress:stepenter", function (event) {
+                    event.target.classList.remove("past");
+                    event.target.classList.remove("future");
+                    event.target.classList.add("present");
+                }, false);
+
+                root.addEventListener("impress:stepleave", function (event) {
+                    event.target.classList.remove("present");
+                    event.target.classList.add("past");
+                }, false);
+
+            }, false);
+
+            // Adding hash change support.
+            root.addEventListener("impress:init", function () {
+
+                // last hash detected
+                var lastHash = "";
+
+                // `#/step-id` is used instead of `#step-id` to prevent default browser
+                // scrolling to element in hash.
+                //
+                // And it has to be set after animation finishes, because in Chrome it
+                // makes transtion laggy.
+                // BUG: http://code.google.com/p/chromium/issues/detail?id=62820
+                root.addEventListener("impress:stepenter", function (event) {
+                    window.location.hash = lastHash = "#/" + event.target.id;
+                }, false);
+
+                window.addEventListener("hashchange", function () {
+                    // When the step is entered hash in the location is updated
+                    // (just few lines above from here), so the hash change is
+                    // triggered and we would call `goto` again on the same element.
+                    //
+                    // To avoid this we store last entered hash and compare.
+                    if (window.location.hash !== lastHash) {
+                        goto(getElementFromHash());
+                    }
+                }, false);
+
+                // START
+                // by selecting step defined in url or first step of the presentation
+                goto(getElementFromHash() || steps[0], 0);
+            }, false);
+
+            body.classList.add("impress-disabled");
+
+            roots["impress-root-" + rootId] = this;
+            // store and return API for given impress.js root element
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
             // First we set up the viewport for mobile devices.
             // For some reason iPad goes nuts when it is not done properly.
             var meta = $("meta[name='viewport']") || document.createElement("meta");
@@ -549,114 +662,6 @@ var Impress = window.Impress = function (rootIdParam) {
     // used to reset timeout for `impress:stepenter` event
         stepEnterTimeout = null;
 
-
-
-
-
-
-
-    if (!impressSupported) {
-        // we can't be sure that `classList` is supported
-        body.className += " impress-not-supported ";
-    } else {
-        body.classList.remove("impress-not-supported");
-        body.classList.add("impress-supported");
-    }
-
-
-    // flag that can be used in JS to check if browser have passed the support test
-    //this.supported = impressSupported;
-
-
-    // If impress.js is not supported by the browser return a dummy API
-    // it may not be a perfect solution but we return early and avoid
-    // running code that may use features not implemented in the browser.
-    if (!impressSupported) {
-        return {
-            init: empty,
-            goto: empty,
-            prev: empty,
-            next: empty
-        };
-    }
-
-
-
-    // if given root is already initialized just return the API
-    if (roots["impress-root-" + rootId]) {
-        return roots["impress-root-" + rootId];
-    }
-
-
-
-    // Adding some useful classes to step elements.
-    //
-    // All the steps that have not been shown yet are given `future` class.
-    // When the step is entered the `future` class is removed and the `present`
-    // class is given. When the step is left `present` class is replaced with
-    // `past` class.
-    //
-    // So every step element is always in one of three possible states:
-    // `future`, `present` and `past`.
-    //
-    // There classes can be used in CSS to style different types of steps.
-    // For example the `present` class can be used to trigger some custom
-    // animations when step is shown.
-    root.addEventListener("impress:init", function () {
-        // STEP CLASSES
-        steps.forEach(function (step) {
-            step.classList.add("future");
-        });
-
-        root.addEventListener("impress:stepenter", function (event) {
-            event.target.classList.remove("past");
-            event.target.classList.remove("future");
-            event.target.classList.add("present");
-        }, false);
-
-        root.addEventListener("impress:stepleave", function (event) {
-            event.target.classList.remove("present");
-            event.target.classList.add("past");
-        }, false);
-
-    }, false);
-
-    // Adding hash change support.
-    root.addEventListener("impress:init", function () {
-
-        // last hash detected
-        var lastHash = "";
-
-        // `#/step-id` is used instead of `#step-id` to prevent default browser
-        // scrolling to element in hash.
-        //
-        // And it has to be set after animation finishes, because in Chrome it
-        // makes transtion laggy.
-        // BUG: http://code.google.com/p/chromium/issues/detail?id=62820
-        root.addEventListener("impress:stepenter", function (event) {
-            window.location.hash = lastHash = "#/" + event.target.id;
-        }, false);
-
-        window.addEventListener("hashchange", function () {
-            // When the step is entered hash in the location is updated
-            // (just few lines above from here), so the hash change is
-            // triggered and we would call `goto` again on the same element.
-            //
-            // To avoid this we store last entered hash and compare.
-            if (window.location.hash !== lastHash) {
-                goto(getElementFromHash());
-            }
-        }, false);
-
-        // START
-        // by selecting step defined in url or first step of the presentation
-        goto(getElementFromHash() || steps[0], 0);
-    }, false);
-
-    body.classList.add("impress-disabled");
-
-    roots["impress-root-" + rootId] = this;
-    // store and return API for given impress.js root element
 
     this.init = init;
     this.goto = goto;
