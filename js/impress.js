@@ -745,12 +745,12 @@ var Impress = window.Impress = function (rootId) {
             // event delegation with "bubbling"
             // check if event target (or any of its parents is a link)
             var target = event.target;
-            while ((target.tagName !== "A") &&
+            while (target && (target.tagName !== "A") &&
             (target !== document.documentElement)) {
                 target = target.parentNode;
             }
 
-            if (target.tagName === "A") {
+            if (target && target.tagName === "A") {
                 var href = target.getAttribute("href");
 
                 // if it's a link to presentation step, target this step
@@ -769,7 +769,7 @@ var Impress = window.Impress = function (rootId) {
         document.addEventListener("click", function (event) {
             var target = event.target;
             // find closest step element that is not active
-            while (!(target.classList.contains("step") && !target.classList.contains("active")) &&
+            while (target && !(target.classList.contains("step") && !target.classList.contains("active")) &&
             (target !== document.documentElement)) {
                 target = target.parentNode;
             }
