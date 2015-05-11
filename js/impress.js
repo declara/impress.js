@@ -381,7 +381,7 @@ var Impress = window.Impress = function (rootIdParam) {
 
     // root presentation elements
         root = byId(rootId),
-        canvas = document.createElement("div"),
+        canvas,
 
         initialized = false,
 
@@ -453,14 +453,10 @@ var Impress = window.Impress = function (rootIdParam) {
 
     // `init` API function that initializes (and runs) the presentation.
         init = function () {
-            if (initialized) {
-                return;
-            }
-
-
-
-
-
+            stepsData = {};
+            roots = {};
+            root = byId(rootId);
+            canvas = document.createElement("div");
             if (!impressSupported) {
                 // we can't be sure that `classList` is supported
                 body.className += " impress-not-supported ";
@@ -561,19 +557,6 @@ var Impress = window.Impress = function (rootIdParam) {
 
             roots["impress-root-" + rootId] = this;
             // store and return API for given impress.js root element
-            
-
-
-
-
-
-
-
-
-
-
-
-
 
 
             // First we set up the viewport for mobile devices.
